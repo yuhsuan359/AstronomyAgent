@@ -10,6 +10,7 @@ from azure.identity import DefaultAzureCredential
 from azure.ai.projects.models import PromptAgentDefinition, FunctionTool
 from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputParam
 from functions import next_visible_event, calculate_observation_cost, generate_observation_report
+from azure.identity import InteractiveBrowserCredential
 
 def main(): 
     # Clear the console
@@ -22,7 +23,8 @@ def main():
 
     # Connect to the project client
     with (
-        DefaultAzureCredential() as credential,
+        #DefaultAzureCredential() as credential,
+        credential = InteractiveBrowserCredential()
         AIProjectClient(endpoint=project_endpoint, credential=credential) as project_client,
         project_client.get_openai_client() as openai_client,
     ):
