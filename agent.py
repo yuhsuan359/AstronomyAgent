@@ -14,6 +14,10 @@ def main():
 
     # Load environment variables
     load_dotenv()
+    print(f"DEBUG: .env 檔案讀取結果: {result}")
+    
+    project_endpoint = os.getenv("PROJECT_ENDPOINT")
+    print(f"DEBUG: 抓到的 Endpoint: {project_endpoint}")
     project_endpoint = os.getenv("PROJECT_ENDPOINT")
     model_deployment = os.getenv("MODEL_DEPLOYMENT_NAME")
 
