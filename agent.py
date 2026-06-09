@@ -1,80 +1,56 @@
 import os
 import json
 from dotenv import load_dotenv
-
-# 使用原生的 Azure AI Projects SDK
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from functions import next_visible_event, calculate_observation_cost, generate_observation_report
 
 def main():
-    # Clear the console
     os.system('cls' if os.name=='nt' else 'clear')
-
-    # Load environment variables
     load_dotenv()
     
-    # 請確保 .env 中的 PROJECT_ENDPOINT 是完整的 Connection String
-    # 格式如: "eastus.api.azureml.ms;subscriptionId=...;resourceGroup=...;projectId=..."
-    project_connection_string = os.getenv("PROJECT_ENDPOINT")
-    model_deployment = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4.1")
-
-    if not project_connection_string:
-        print("錯誤: 請確認 .env 檔案中已設定 PROJECT_ENDPOINT (請使用 Connection String)")
+    # 1. 確保 Connection String 正確
+    conn_str = os.getenv("PROJECT_ENDPOINT")
+    if not conn_str:
+        print("錯誤: .env 找不到 PROJECT_ENDPOINT")
         return
 
-    # 使用 DefaultAzureCredential，它會自動抓取你 az login 的登入狀態
-    credential = DefaultAzureCredential()
-
-    # 使用 Connection String 初始化，這是最穩定、最能解決 404 的連線方式
+    # 2. 初始化 Client
     project_client = AIProjectClient.from_connection_string(
-        credential=credential,
-        conn_str=project_connection_string
+        credential=DefaultAzureCredential(),
+        conn_str=conn_str
     )
     
-    # 取得 OpenAI client
-    openai_client = project_client.get_openai_client()
+    # 3. 關鍵修正：直接取得 OpenAI Client，並確保指定正確的 API 版本
+    openai_client = project_client.get_openai_client(api_version="2024-05-01-preview")
 
-    # 定義工具
+    # 4. 建立 Assistant 時，明確使用部署名稱
+    # 如果還是報 404，請檢查 Azure AI Foundry > Models > Deployments 中該模型的 Name
+    deployment_name = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4.1")
+    
     tools = [
-        {
-            "type": "function", 
-            "function": {
-                "name": "next_visible_event",
-                "description": "Get the next visible event in a given location.",
-                "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}
-            }
-        },
-        {
-            "type": "function", 
-            "function": {
-                "name": "calculate_observation_cost",
-                "description": "Calculate the cost of an observation.",
-                "parameters": {"type": "object", "properties": {"telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}}, "required": ["telescope_tier", "hours", "priority"]}
-            }
-        },
-        {
-            "type": "function", 
-            "function": {
-                "name": "generate_observation_report",
-                "description": "Generate a report summarizing an observation",
-                "parameters": {"type": "object", "properties": {"event_name": {"type": "string"}, "location": {"type": "string"}, "telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}, "observer_name": {"type": "string"}}, "required": ["event_name", "location", "telescope_tier", "hours", "priority", "observer_name"]}
-            }
-        }
+        {"type": "function", "function": {"name": "next_visible_event", "description": "Get the next visible event in a given location.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "calculate_observation_cost", "description": "Calculate the cost of an observation.", "parameters": {"type": "object", "properties": {"telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}}, "required": ["telescope_tier", "hours", "priority"]}}},
+        {"type": "function", "function": {"name": "generate_observation_report", "description": "Generate a report summarizing an observation", "parameters": {"type": "object", "properties": {"event_name": {"type": "string"}, "location": {"type": "string"}, "telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}, "observer_name": {"type": "string"}}, "required": ["event_name", "location", "telescope_tier", "hours", "priority", "observer_name"]}}}
     ]
 
-    # 建立 Agent
-    agent = openai_client.beta.assistants.create(
-        model=model_deployment,
-        name="astronomy-agent",
-        instructions="You are an astronomy assistant. Use the provided tools to help users.",
-        tools=tools
-    )
+    print(f"正在連線至部署: {deployment_name} ...")
     
-    # 建立對話 Thread
+    try:
+        agent = openai_client.beta.assistants.create(
+            model=deployment_name, 
+            name="astronomy-agent",
+            instructions="You are an astronomy assistant.",
+            tools=tools
+        )
+    except Exception as e:
+        print(f"\n[致命錯誤] 建立 Assistant 失敗: {e}")
+        print("提示: 請檢查 Azure AI Foundry > Models > Deployments 中的模型名稱是否為 'gpt-4.1'")
+        return
+    
     thread = openai_client.beta.threads.create()
     
-    print("Agent 已啟動！輸入 'quit' 結束。")
+    print("Agent 已啟動！")
     while True:
         user_input = input("\nUSER: ").strip()
         if user_input.lower() == "quit": break
@@ -88,17 +64,18 @@ def main():
                 name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
                 
-                if name == "next_visible_event": output = next_visible_event(**args)
-                elif name == "calculate_observation_cost": output = calculate_observation_cost(**args)
-                elif name == "generate_observation_report": output = generate_observation_report(**args)
+                # 執行函數
+                result = None
+                if name == "next_visible_event": result = next_visible_event(**args)
+                elif name == "calculate_observation_cost": result = calculate_observation_cost(**args)
+                elif name == "generate_observation_report": result = generate_observation_report(**args)
                 
-                tool_outputs.append({"tool_call_id": tool_call.id, "output": json.dumps(output)})
+                tool_outputs.append({"tool_call_id": tool_call.id, "output": json.dumps(result)})
             
             run = openai_client.beta.threads.runs.submit_tool_outputs_and_poll(thread_id=thread.id, run_id=run.id, tool_outputs=tool_outputs)
 
         messages = openai_client.beta.threads.messages.list(thread_id=thread.id)
-        if messages.data:
-            print(f"AGENT: {messages.data[0].content[0].text.value}")
+        print(f"AGENT: {messages.data[0].content[0].text.value}")
 
 if __name__ == "__main__":
     main()
