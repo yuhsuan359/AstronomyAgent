@@ -97,9 +97,16 @@ def main():
     #    instructions="You are an astronomy assistant. Use tools to help users.",
     #    tools=[event_tool, cost_tool, report_tool],
     #)
-    # 檢查 agents 物件裡面到底有什麼方法
-    print("DEBUG: agents 可用的屬性/方法:")
-    print(dir(project_client.agents))
+    agent = openai_client.beta.assistants.create(
+            model=model_deployment,
+            name="astronomy-agent",
+            instructions="You are an astronomy assistant. Use tools to help users.",
+            tools=[
+                {"type": "function", "function": {"name": "next_visible_event", "description": "...", "parameters": {...}}},
+                {"type": "function", "function": {"name": "calculate_observation_cost", "description": "...", "parameters": {...}}},
+                {"type": "function", "function": {"name": "generate_observation_report", "description": "...", "parameters": {...}}}
+            ],
+        )
     # 建立對話 Thread
     thread = openai_client.beta.threads.create()
     
