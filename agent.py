@@ -7,10 +7,8 @@ from azure.identity import DefaultAzureCredential
 from functions import next_visible_event, calculate_observation_cost, generate_observation_report
 
 def main():
-    # 1. 強制輸出緩衝，確保 print 內容能馬上看到
     sys.stdout.reconfigure(line_buffering=True)
-    
-    print("--- 程式開始啟動 ---")
+    print("--- 程式開始啟動 (Chat Completions 模式) ---")
     load_dotenv()
     
     endpoint = os.getenv("PROJECT_ENDPOINT")
@@ -21,56 +19,55 @@ def main():
         return
 
     try:
-        print(f"嘗試連接至: {endpoint}")
-        project_client = AIProjectClient(
-            endpoint=endpoint,
-            credential=DefaultAzureCredential()
-        )
-        
-        print("成功建立 ProjectClient，正在取得 OpenAI Client...")
+        project_client = AIProjectClient(endpoint=endpoint, credential=DefaultAzureCredential())
         openai_client = project_client.get_openai_client()
 
+        # 定義工具 (Chat Completion 格式)
         tools = [
             {"type": "function", "function": {"name": "next_visible_event", "description": "Get the next visible event.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
             {"type": "function", "function": {"name": "calculate_observation_cost", "description": "Calculate cost.", "parameters": {"type": "object", "properties": {"telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}}, "required": ["telescope_tier", "hours", "priority"]}}},
             {"type": "function", "function": {"name": "generate_observation_report", "description": "Generate report.", "parameters": {"type": "object", "properties": {"event_name": {"type": "string"}, "location": {"type": "string"}, "telescope_tier": {"type": "string"}, "hours": {"type": "number"}, "priority": {"type": "string"}, "observer_name": {"type": "string"}}, "required": ["event_name", "location", "telescope_tier", "hours", "priority", "observer_name"]}}}
         ]
 
-        print("正在註冊 Agent...")
-        agent = openai_client.beta.assistants.create(
-            model=deployment_name,
-            name="astronomy-agent",
-            instructions="You are an astronomy assistant.",
-            tools=tools
-        )
-        
-        thread = openai_client.beta.threads.create()
+        messages = [{"role": "system", "content": "You are an astronomy assistant."}]
         print("--- Agent 已啟動！輸入 'quit' 結束 ---")
 
         while True:
             user_input = input("\nUSER: ").strip()
             if user_input.lower() == "quit": break
 
-            openai_client.beta.threads.messages.create(thread_id=thread.id, role="user", content=user_input)
-            run = openai_client.beta.threads.runs.create_and_poll(thread_id=thread.id, assistant_id=agent.id)
+            messages.append({"role": "user", "content": user_input})
+            
+            # 發送請求
+            response = openai_client.chat.completions.create(
+                model=deployment_name,
+                messages=messages,
+                tools=[{"type": "function", "function": t["function"]} for t in tools],
+                tool_choice="auto"
+            )
 
-            if run.status == 'requires_action':
-                tool_outputs = []
-                for tool_call in run.required_action.submit_tool_outputs.tool_calls:
+            res_message = response.choices[0].message
+            messages.append(res_message)
+
+            # 處理 Function Calling
+            if res_message.tool_calls:
+                for tool_call in res_message.tool_calls:
                     name = tool_call.function.name
                     args = json.loads(tool_call.function.arguments)
                     
-                    result = None
                     if name == "next_visible_event": result = next_visible_event(**args)
                     elif name == "calculate_observation_cost": result = calculate_observation_cost(**args)
                     elif name == "generate_observation_report": result = generate_observation_report(**args)
                     
-                    tool_outputs.append({"tool_call_id": tool_call.id, "output": json.dumps(result)})
+                    messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
                 
-                run = openai_client.beta.threads.runs.submit_tool_outputs_and_poll(thread_id=thread.id, run_id=run.id, tool_outputs=tool_outputs)
-
-            messages = openai_client.beta.threads.messages.list(thread_id=thread.id)
-            print(f"AGENT: {messages.data[0].content[0].text.value}")
+                # 再次發送請求取得最終回答
+                final_response = openai_client.chat.completions.create(model=deployment_name, messages=messages)
+                answer = final_response.choices[0].message.content
+                print(f"AGENT: {answer}")
+                messages.append({"role": "assistant", "content": answer})
+            else:
+                print(f"AGENT: {res_message.content}")
 
     except Exception as e:
         print(f"\n[發生錯誤]: {e}")
