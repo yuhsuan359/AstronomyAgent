@@ -91,13 +91,15 @@ def main():
     )
 
     # 建立 Agent
-    agent = project_client.agents.create_agent(
-        model=model_deployment,
-        name="astronomy-agent",
-        instructions="You are an astronomy assistant. Use tools to help users.",
-        tools=[event_tool, cost_tool, report_tool],
-    )
-    
+    #agent = project_client.agents.create_agent(
+    #    model=model_deployment,
+    #    name="astronomy-agent",
+    #    instructions="You are an astronomy assistant. Use tools to help users.",
+    #    tools=[event_tool, cost_tool, report_tool],
+    #)
+    # 檢查 agents 物件裡面到底有什麼方法
+    print("DEBUG: agents 可用的屬性/方法:")
+    print(dir(project_client.agents))
     # 建立對話 Thread
     thread = openai_client.beta.threads.create()
     
