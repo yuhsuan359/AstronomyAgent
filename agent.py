@@ -86,7 +86,7 @@ def main():
 
     # 建立 Agent
     agent = openai_client.beta.assistants.create(
-        model=model_deployment,
+        model=gpt-4.1,
         name="astronomy-agent",
         instructions="You are an astronomy assistant. Use the provided tools to help users.",
         tools=tools
