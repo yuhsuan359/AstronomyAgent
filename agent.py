@@ -25,7 +25,7 @@ def main():
     with (
         #DefaultAzureCredential() as credential,
         credential = InteractiveBrowserCredential()
-        AIProjectClient(endpoint=project_endpoint, credential=credential) as project_client,
+        AIProjectClient(endpoint=os.getenv("PROJECT_ENDPOINT"), credential=credential) as project_client,
         project_client.get_openai_client() as openai_client,
     ):
 
