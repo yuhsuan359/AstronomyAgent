@@ -3,14 +3,11 @@ import json
 from dotenv import load_dotenv
 
 # Add references
-# Add references
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import FunctionTool
-from azure.identity import DefaultAzureCredential
 from azure.ai.projects.models import PromptAgentDefinition, FunctionTool
-from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputParam
-from functions import next_visible_event, calculate_observation_cost, generate_observation_report
 from azure.identity import InteractiveBrowserCredential
+from openai.types.beta.threads.runs.function_tool_call import FunctionToolCall
+from functions import next_visible_event, calculate_observation_cost, generate_observation_report
 
 def main(): 
     # Clear the console
@@ -21,183 +18,114 @@ def main():
     project_endpoint = os.getenv("PROJECT_ENDPOINT")
     model_deployment = os.getenv("MODEL_DEPLOYMENT_NAME")
 
-    # Connect to the project client
-    with (
-        #DefaultAzureCredential() as credential,
-        credential = InteractiveBrowserCredential()
-        AIProjectClient(endpoint=os.getenv("PROJECT_ENDPOINT"), credential=credential) as project_client,
-        project_client.get_openai_client() as openai_client,
-    ):
+    # 1. 建立認證方式
+    credential = InteractiveBrowserCredential()
 
-        # Define the event function tool
+    # 2. 連接到 Project Client
+    with AIProjectClient.from_connection_string(
+        credential=credential,
+        conn_str=os.getenv("PROJECT_CONNECTION_STRING") # 若您是用 endpoint，請改回 endpoint 參數
+    ) as project_client:
+        
+        # 取得 OpenAI client
+        openai_client = project_client.agents.get_openai_client()
+
+        # 定義工具
         event_tool = FunctionTool(
             name="next_visible_event",
             description="Get the next visible event in a given location.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "continent to find the next visible event in (e.g. 'north_america', 'south_america', 'australia')",
-                    },
+                    "location": {"type": "string", "description": "continent to find the next visible event in"},
                 },
                 "required": ["location"],
-                "additionalProperties": False,
             },
-            strict=True,
         )
 
-        # Define the observation cost function tool
-        # Define the observation cost function tool
-        # Define the observation cost function tool
         cost_tool = FunctionTool(
             name="calculate_observation_cost",
-            description="Calculate the cost of an observation based on the telescope tier, number of hours, and priority level.",
+            description="Calculate the cost of an observation.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "telescope_tier": {
-                        "type": "string",
-                        "description": "the tier of the telescope (e.g. 'standard', 'advanced', 'premium')",
-                    },
-                    "hours": {
-                        "type": "number",
-                        "description": "the number of hours for the observation",
-                    },
-                    "priority": {
-                        "type": "string",
-                        "description": "the priority level of the observation (e.g. 'low', 'normal', 'high')",
-                    },
+                    "telescope_tier": {"type": "string"},
+                    "hours": {"type": "number"},
+                    "priority": {"type": "string"},
                 },
                 "required": ["telescope_tier", "hours", "priority"],
-                "additionalProperties": False,
             },
-            strict=True,
         )
 
-        # Define the observation report generation function tool
-        # Define the observation report generation function tool
         report_tool = FunctionTool(
             name="generate_observation_report",
-            description="Generate a report summarizing an astronomical observation",
+            description="Generate a report summarizing an observation",
             parameters={
                 "type": "object",
                 "properties": {
-                    "event_name": {
-                        "type": "string",
-                        "description": "the name of the astronomical event being observed",
-                    },
-                    "location": {
-                        "type": "string",
-                        "description": "the location of the observer",
-                    },
-                    "telescope_tier": {
-                        "type": "string",
-                        "description": "the tier of the telescope used for the observation (e.g. 'standard', 'advanced', 'premium')",
-                    },
-                    "hours": {
-                        "type": "number",
-                        "description": "the number of hours the telescope was used for the observation",
-                    },
-                    "priority": {
-                        "type": "string",
-                        "description": "the priority level of the observation (e.g. 'low', 'normal', 'high')",
-                    },
-                    "observer_name": {
-                        "type": "string",
-                        "description": "the name of the person who conducted the observation",
-                    },                   
+                    "event_name": {"type": "string"},
+                    "location": {"type": "string"},
+                    "telescope_tier": {"type": "string"},
+                    "hours": {"type": "number"},
+                    "priority": {"type": "string"},
+                    "observer_name": {"type": "string"},
                 },
                 "required": ["event_name", "location", "telescope_tier", "hours", "priority", "observer_name"],
-                "additionalProperties": False,
             },
-            strict=True,
         )
 
-        # Create a new agent with the function tools
-        # Create a new agent with the function tools
-        agent = project_client.agents.create_version(
-            agent_name="astronomy-agent",
-            definition=PromptAgentDefinition(
-                model=model_deployment,
-                instructions=
-                    """You are an astronomy observations assistant that helps users find 
-                    information about astronomical events and calculate telescope rental costs. 
-                    Use the available tools to assist users with their inquiries.""",
-                tools=[event_tool, cost_tool, report_tool],
-            ),
+        # 建立 Agent
+        agent = project_client.agents.create_agent(
+            model=model_deployment,
+            name="astronomy-agent",
+            instructions="You are an astronomy assistant. Use tools to help users.",
+            tools=[event_tool, cost_tool, report_tool],
         )
         
-        # Create a thread for the chat session
-        # Create a thread for the chat session
-        conversation = openai_client.conversations.create()
-
-        # Create a list to hold function call outputs that will be sent back as input to the agent
-        # Create a list to hold function call outputs that will be sent back as input to the agent
-        input_list: ResponseInputParam = []
+        # 建立對話 Thread
+        thread = openai_client.beta.threads.create()
         
+        print("Agent 已啟動！輸入 'quit' 結束。")
         while True:
-            user_input = input("Enter a prompt for the astronomy agent. Use 'quit' to exit.\nUSER: ").strip()
-            if user_input.lower() == "quit":
-                print("Exiting chat.")
-                break
+            user_input = input("\nUSER: ").strip()
+            if user_input.lower() == "quit": break
 
-            # Send a prompt to the agent
-            # Send a prompt to the agent
-            openai_client.conversations.items.create(
-                conversation_id=conversation.id,
-                items=[{"type": "message", "role": "user", "content": user_input}],
-            )
-        
-            # Retrieve the agent's response, which may include function calls
-            # Retrieve the agent's response, which may include function calls
-            response = openai_client.responses.create(
-                conversation=conversation.id,
-                extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-                input=input_list,
+            # 發送訊息
+            openai_client.beta.threads.messages.create(
+                thread_id=thread.id, role="user", content=user_input
             )
 
-            # Check the run status for failures
-            if response.status == "failed":
-                print(f"Response failed: {response.error}")
+            # 執行 Agent
+            run = openai_client.beta.threads.runs.create_and_poll(
+                thread_id=thread.id, assistant_id=agent.id
+            )
 
-            # Process function calls
-            # Process function calls
-            for item in response.output:
-                if item.type == "function_call":
-                    # Retrieve the matching function tool
-                    function_name = item.name
-                    result = None
-                    if item.name == "next_visible_event":
-                        result = next_visible_event(**json.loads(item.arguments))
-                    elif item.name == "calculate_observation_cost":
-                        result = calculate_observation_cost(**json.loads(item.arguments))
-                    elif item.name == "generate_observation_report":
-                        result = generate_observation_report(**json.loads(item.arguments))
-                            
-                    # Append the output text
-                    input_list.append(
-                        FunctionCallOutput(
-                            type="function_call_output",
-                            call_id=item.call_id,
-                            output=result,
-                        )
-                    )
-
-            # Send function call outputs back to the model and retrieve a response
-            # Send function call outputs back to the model and retrieve a response
-            if input_list:
-                response = openai_client.responses.create(
-                    input=input_list,
-                    previous_response_id=response.id,
-                    extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+            if run.status == 'requires_action':
+                # 處理工具呼叫
+                tool_outputs = []
+                for tool_call in run.required_action.submit_tool_outputs.tool_calls:
+                    name = tool_call.function.name
+                    args = json.loads(tool_call.function.arguments)
+                    
+                    if name == "next_visible_event":
+                        output = next_visible_event(**args)
+                    elif name == "calculate_observation_cost":
+                        output = calculate_observation_cost(**args)
+                    elif name == "generate_observation_report":
+                        output = generate_observation_report(**args)
+                    
+                    tool_outputs.append({"tool_call_id": tool_call.id, "output": json.dumps(output)})
+                
+                # 送回結果
+                openai_client.beta.threads.runs.submit_tool_outputs(
+                    thread_id=thread.id, run_id=run.id, tool_outputs=tool_outputs
                 )
-            # Display the agent's response
-            print(f"AGENT: {response.output_text}")
+                # 等待完成
+                run = openai_client.beta.threads.runs.poll(thread_id=thread.id, run_id=run.id)
 
-        # Delete the agent when done
-         # Delete the agent when done
-  
+            # 顯示結果
+            messages = openai_client.beta.threads.messages.list(thread_id=thread.id)
+            print(f"AGENT: {messages.data[0].content[0].text.value}")
 
-if __name__ == '__main__': 
+if __name__ == "__main__":
     main()
