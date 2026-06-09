@@ -43,7 +43,8 @@ def main():
     
     # 取得 OpenAI client
     #openai_client = project_client.agents.get_openai_client()
-    openai_client = project_client.inference.get_openai_client()
+    # 修改為直接呼叫 client 的方法
+    openai_client = project_client.get_openai_client()
 
     # 定義工具
     event_tool = FunctionTool(
