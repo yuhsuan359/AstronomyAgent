@@ -12,12 +12,19 @@ def main():
     # Clear the console
     os.system('cls' if os.name=='nt' else 'clear')
 
+
+    # 確認當前 Python 執行的工作目錄
+    print(f"DEBUG: 當前工作目錄: {os.getcwd()}")
+    
+    # 檢查 .env 是否存在於該目錄
+    if os.path.exists(".env"):
+        print("DEBUG: 找到 .env 檔案了！")
+    else:
+        print("DEBUG: 找不到 .env 檔案！請檢查檔名是否為 .env")
+        return # 檔案沒找到就停止執行
     # Load environment variables
     load_dotenv()
-    print(f"DEBUG: .env 檔案讀取結果: {result}")
     
-    project_endpoint = os.getenv("PROJECT_ENDPOINT")
-    print(f"DEBUG: 抓到的 Endpoint: {project_endpoint}")
     project_endpoint = os.getenv("PROJECT_ENDPOINT")
     model_deployment = os.getenv("MODEL_DEPLOYMENT_NAME")
 
